@@ -78,3 +78,45 @@ python zero-shot.py llama3 --data_folder ./data
 
 Place the files you want to query (e.g. resumes, PDFs, text files) in the `data/` folder before running.
 
+---
+
+### `rag-poison-test.py` — Iterative RAG poisoning harness
+
+Runs a multi-turn red-team experiment in which an **adversary model** tries to hijack a **target model** via a poisoned RAG document. Each attempt, the adversary crafts hidden directives and embeds them into a document. The target loads the poisoned document and answers a benign user prompt. The adversary then judges whether the attack succeeded; if not, it reflects on the failure and tries again. Successful attacks are recorded to `successes.csv`.
+
+Two modes are supported:
+- **Poisoned file** (default): the adversary reads an existing benign document and appends a hidden injection to it.
+- **Standalone** (`--standalone`): the adversary writes an entirely adversarial file from scratch, with no benign source document required.
+
+```bash
+python rag-poison-test.py <adversary_model> <target_model> <poisoned_file> <poison_goal> <target_prompt> [benign_file] [options]
+```
+
+| Argument | Description |
+|---|---|
+| `adversary_model` | Ollama model that crafts the injections and evaluates results |
+| `target_model` | Ollama model being attacked |
+| `poisoned_file` | Path where the poisoned document is written on each attempt |
+| `poison_goal` | Text file describing what the adversary wants the target to do |
+| `target_prompt` | Text file containing the benign query the target believes it is answering |
+| `benign_file` | Source document to poison (omit when using `--standalone`) |
+
+| Option | Description | Default |
+|---|---|---|
+| `--embedding` | HuggingFace embedding model for RAG | `BAAI/bge-small-en-v1.5` |
+| `--max_attempts` | Maximum poisoning attempts before giving up | `100` |
+| `--top_k` | Document chunks retrieved per RAG query | `4000` |
+| `--max_doc_chars` | Max characters of the benign document sent to the adversary | `4000` |
+| `--standalone` | Adversary writes the poisoned file from scratch; `benign_file` is not used | — |
+
+**Example — poison an existing file:**
+```bash
+python rag-poison-test.py llama3 llama3 poisoned/people_poisoned.csv badgoal.txt goodgoal.txt data/people.csv
+```
+
+**Example — standalone mode (no benign file):**
+```bash
+python rag-poison-test.py llama3 llama3 poisoned/standalone.txt badgoal.txt goodgoal.txt --standalone
+```
+
+`goodgoal.txt` and `badgoal.txt` contain example target prompts and poison goals respectively and can be used as templates for your own experiments. Successful injections are appended to `successes.csv` with the injection text, attempt number, and full target response.

@@ -11,6 +11,7 @@ if [ ! -d $VENV_DIR ]; then
     source "$VENV_DIR/bin/activate"
     pip install --upgrade pip
     pip install --no-cache-dir llama-index llama-index-llms-ollama llama-index-embeddings-huggingface
+    pip install --no-cache-dir pypdf reportlab python-docx
     echo "Virtual environment is all set up!"
 else
     echo "Virtual environment is already set up."

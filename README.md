@@ -120,3 +120,35 @@ python rag-poison-test.py llama3 llama3 poisoned/standalone.txt badgoal.txt good
 ```
 
 `goodgoal.txt` and `badgoal.txt` contain example target prompts and poison goals respectively and can be used as templates for your own experiments. Successful injections are appended to `successes.csv` with the injection text, attempt number, and full target response.
+
+---
+
+### `injection-tester.py` — Injection robustness tester
+
+Reads a CSV of pre-crafted poison prompts and measures how reliably each one hijacks a target model. For every prompt, the injection is embedded into a benign file and the target is queried `TRIALS_PER_PROMPT` (default: 20) times. A separate evaluator LLM judges each response and the per-prompt hijack rate is reported.
+
+The input CSV must have a `poison_prompt` column. An optional `poison_goal` column enables more precise evaluation; without it a generic hijack-detection prompt is used.
+
+```bash
+python injection-tester.py <poisoned_prompts_csv> <benign_file> <target_model> <benign_prompt_file> <output_csv> [options]
+```
+
+| Argument | Description |
+|---|---|
+| `poisoned_prompts_csv` | CSV with a `poison_prompt` column (and optionally a `poison_goal` column that represents the original goal of the adversary) |
+| `benign_file` | Original document that each injection is embedded into |
+| `target_model` | Ollama model being tested for resilience |
+| `benign_prompt_file` | Text file containing the benign query the target is asked |
+| `output_csv` | CSV file where results are appended (`poison_prompt`, `poison_goal`, `trial`, `response`, `hijacked`) |
+
+| Option | Description | Default |
+|---|---|---|
+| `--defense` | Defense mechanism to apply before querying the target (currently defunct — will be implemented in a future update) | `none` |
+| `--embedding` | HuggingFace embedding model for RAG | `BAAI/bge-small-en-v1.5` |
+| `--top_k` | Document chunks retrieved per RAG query | `4000` |
+| `--poison_file` | Path to write the temporary poisoned file | auto (temp file) |
+
+**Example:**
+```bash
+python injection-tester.py statistics/lying-csv/round_1_successes.csv data/people.csv llama3 goodgoal.txt results.csv
+```

@@ -89,16 +89,28 @@ def write_standalone_file(injection_text, output_path):
         f.write(injection_text)
 
 
-def write_poisoned_file(benign_path, injection_text, output_path):
-    """Append injection text to a plain-text copy of the benign file."""
+def write_poisoned_file(benign_path, injection_text, output_path, injection_position=-1):
+    """Write the benign file with injection text inserted at the specified position.
+
+    injection_position:
+      -1  -> append at the very bottom (default)
+       0  -> insert at the very top
+       N  -> insert after line N from the top
+    """
     parent = os.path.dirname(os.path.abspath(output_path))
     os.makedirs(parent, exist_ok=True)
     with open(benign_path, "r", errors="replace") as f:
         benign_content = f.read()
+    if injection_position == -1:
+        result = benign_content + "\n\n" + injection_text
+    elif injection_position == 0:
+        result = injection_text + "\n\n" + benign_content
+    else:
+        lines = benign_content.splitlines(keepends=True)
+        insert_at = min(injection_position, len(lines))
+        result = "".join(lines[:insert_at]) + "\n\n" + injection_text + "\n\n" + "".join(lines[insert_at:])
     with open(output_path, "w") as f:
-        f.write(benign_content)
-        f.write("\n\n")
-        f.write(injection_text)
+        f.write(result)
 
 
 def build_query_engine(file_path, top_k, llm):
@@ -232,7 +244,8 @@ def _record_success(poison_goal, injection_text, attempt, output_stripped, outpu
 
 def run_session(adversary_model, target_model, benign_file, poisoned_file,
                 poison_goal, target_prompt, embedding, max_attempts, top_k, max_doc_chars, standalone,
-                keep_target_thinking=False):
+                keep_target_thinking=False, injection_position=-1,
+                evaluator="adversary", critic="adversary"):
 
     if standalone:
         benign_content_for_adv = None
@@ -250,6 +263,9 @@ def run_session(adversary_model, target_model, benign_file, poisoned_file,
     adversary = Adversary(model=adversary_model)
     target_llm = Ollama(model=target_model, request_timeout=1000.0)
 
+    evaluator_agent = adversary if evaluator == "adversary" else Adversary(model=target_model)
+    critic_agent = adversary if critic == "adversary" else Adversary(model=target_model)
+
     print(f"\n{'='*60}")
     print("RAG Poisoning Test")
     print(f"Adversary model : {adversary_model}")
@@ -260,6 +276,8 @@ def run_session(adversary_model, target_model, benign_file, poisoned_file,
         print(f"Benign file     : {benign_file}")
     print(f"Poisoned file   : {poisoned_file}")
     print(f"Max attempts    : {max_attempts}")
+    print(f"Evaluator       : {evaluator} ({adversary_model if evaluator == 'adversary' else target_model})")
+    print(f"Critic          : {critic} ({adversary_model if critic == 'adversary' else target_model})")
     print(f"{'='*60}\n")
 
     last_target_reply = None
@@ -330,30 +348,35 @@ causes that target model to follow a hidden command instead of the user's origin
         if standalone:
             write_standalone_file(injection_text, poisoned_file)
         else:
-            write_poisoned_file(benign_file, injection_text, poisoned_file)
+            write_poisoned_file(benign_file, injection_text, poisoned_file, injection_position)
 
         # Target loads the poisoned file and answers the benign prompt
         print("[Target] Building RAG index from poisoned file...")
         query_engine = build_query_engine(poisoned_file, top_k, target_llm)
 
         print(f"[Target] Answering: \"{target_prompt}\"...")
-        raw_response = query_engine.query(target_prompt)
-        raw_response_text = str(raw_response)
-        print(f"\n[Target (raw)]:\n{raw_response_text}\n")
-        if keep_target_thinking:
-            last_target_reply = raw_response_text
-            if not last_target_reply:
-                raise RuntimeError("Target returned an empty reply.")
-            print(f"[Target thinking tags retained for adversary feedback.]\n")
-        else:
-            last_target_reply = strip_thinking(raw_response_text)
-            if not last_target_reply:
-                raise RuntimeError("Target returned an empty reply after stripping thinking tags.")
-            print(f"\n[Target (stripped)]:\n{last_target_reply}\n")
+        while True:
+            raw_response = query_engine.query(target_prompt)
+            raw_response_text = str(raw_response)
+            print(f"\n[Target (raw)]:\n{raw_response_text}\n")
+            if not raw_response_text:
+                print("[Target] Empty reply — retrying...\n")
+                continue
+            if keep_target_thinking:
+                last_target_reply = raw_response_text
+                print(f"[Target thinking tags retained for adversary feedback.]\n")
+                break
+            else:
+                last_target_reply = strip_thinking(raw_response_text)
+                if not last_target_reply:
+                    print("[Target] Empty reply after stripping thinking tags — retrying...\n")
+                    continue
+                print(f"\n[Target (stripped)]:\n{last_target_reply}\n")
+                break
 
-        # Adversary evaluates whether the attack succeeded
-        print("[Adversary] Evaluating result...")
-        if adversary.evaluate(poison_goal, last_target_reply):
+        # Evaluator checks whether the attack succeeded
+        print(f"[{evaluator.capitalize()} (evaluator)] Evaluating result...")
+        if evaluator_agent.evaluate(poison_goal, last_target_reply):
             print(f"\n{'='*60}")
             print(f"POISON SUCCEEDED on attempt {attempt}.")
             print(f"{'='*60}\n")
@@ -369,15 +392,15 @@ causes that target model to follow a hidden command instead of the user's origin
 
         print(f"Poison did not succeed on attempt {attempt}.\n")
         if attempt < max_attempts:
-            print(f"[Adversary] Reflecting on failure...")
-            reflection = adversary.reflect(
+            print(f"[{critic.capitalize()} (critic)] Reflecting on failure...")
+            reflection = critic_agent.reflect(
                 injection_text, last_target_reply, poison_goal,
                 benign_content=benign_content_for_adv if not standalone else None,
                 user_query=target_prompt if not standalone else None,
             )
             if not reflection:
-                raise RuntimeError("Adversary returned an empty reflection after stripping thinking tags.")
-            print(f"\n[Adversary reflection]:\n{reflection}\n")
+                raise RuntimeError("Critic returned an empty reflection after stripping thinking tags.")
+            print(f"\n[{critic.capitalize()} (critic) reflection]:\n{reflection}\n")
             reflection_injection = _try_parse_injection(reflection)
             if reflection_injection:
                 print("[Adversary] Injection found in reflection — will use it directly next attempt.\n")
@@ -432,6 +455,16 @@ def main():
                         help="Pass the target model's raw reply (including <think> blocks) back to the adversary "
                              "instead of stripping them out. May give the adversary insight into the target's "
                              "reasoning. Thinking tags are stripped by default.")
+    parser.add_argument("--injection_position", type=int, default=-1,
+                        help="Where in the benign file to insert the injection: "
+                             "-1 (default) appends at the bottom, 0 prepends at the top, "
+                             "N inserts after line N from the top. Ignored in standalone mode.")
+    parser.add_argument("--evaluator", choices=["adversary", "target"], default="adversary",
+                        help="Which model judges whether an injection succeeded: "
+                             "'adversary' (default) or 'target'.")
+    parser.add_argument("--critic", choices=["adversary", "target"], default="adversary",
+                        help="Which model reflects on failed attempts and suggests improvements: "
+                             "'adversary' (default) or 'target'.")
 
     args = parser.parse_args()
 
@@ -454,6 +487,9 @@ def main():
         max_doc_chars=args.max_doc_chars,
         standalone=args.standalone,
         keep_target_thinking=args.keep_target_thinking,
+        injection_position=args.injection_position,
+        evaluator=args.evaluator,
+        critic=args.critic,
     )
 
 

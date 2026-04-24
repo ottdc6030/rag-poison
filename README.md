@@ -108,6 +108,8 @@ python rag-poison-test.py <adversary_model> <target_model> <poisoned_file> <pois
 | `--top_k` | Document chunks retrieved per RAG query | `4000` |
 | `--max_doc_chars` | Max characters of the benign document sent to the adversary | `4000` |
 | `--standalone` | Adversary writes the poisoned file from scratch; `benign_file` is not used | — |
+| `--defense` | Defense mechanism applied to the target output before attack evaluation | `none` |
+| `--defense_model` | Ollama model used by the defense layer | target model |
 
 **Example — poison an existing file:**
 ```bash
@@ -143,10 +145,12 @@ python injection-tester.py <poisoned_prompts_csv> <benign_file> <target_model> <
 
 | Option | Description | Default |
 |---|---|---|
-| `--defense` | Defense mechanism to apply before querying the target (currently defunct — will be implemented in a future update) | `none` |
+| `--defense` | Defense mechanism apply to the output before evaluation | `none` |
+| `--defense_model` | Ollama model used by the defense layer | target model |
 | `--embedding` | HuggingFace embedding model for RAG | `BAAI/bge-small-en-v1.5` |
 | `--top_k` | Document chunks retrieved per RAG query | `4000` |
 | `--poison_file` | Path to write the temporary poisoned file | auto (temp file) |
+| `--trials` | Number of trials per poison prompt | `20` |
 
 **Example:**
 ```bash

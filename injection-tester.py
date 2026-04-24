@@ -3,21 +3,24 @@ sys.path.append(".")
 
 import csv
 import os
-import tempfile
 from llama_index.core import Settings
 from llama_index.core.llms import ChatMessage, MessageRole
 from llama_index.llms.ollama import Ollama
 from llama_index.embeddings.huggingface import HuggingFaceEmbedding
 from argparse import ArgumentParser
 
-from rag_poison_test import load_text, strip_thinking, write_poisoned_file, build_query_engine
+from rag_poison_test import (
+    apply_llm_defense,
+    build_query_engine,
+    load_text,
+    strip_thinking,
+    write_poisoned_file,
+)
 
 # Injection robustness tester.
 # Given a CSV of pre-crafted poisoned prompts, this script injects each one into a
 # benign file, then repeatedly queries a target model with a benign prompt to measure
 # how often the injection succeeds in hijacking the model's response.
-
-TRIALS_PER_PROMPT = 20
 
 
 # ---------------------------------------------------------------------------
@@ -76,9 +79,11 @@ def run_test(
     benign_prompt_file,
     output_csv,
     defense,
+    defense_model,
     embedding,
     top_k,
-    poison_file
+    poison_file,
+    trials
 ):
     benign_prompt = load_text(benign_prompt_file)
 
@@ -86,10 +91,14 @@ def run_test(
     Settings.embed_model = HuggingFaceEmbedding(model_name=embedding)
     target_llm = Ollama(model=target_model, request_timeout=1000.0)
     eval_llm = Ollama(model=target_model, request_timeout=1000.0)
+    if defense == "llm":
+        defense_llm = Ollama(model=defense_model, request_timeout=1000.0)
+    else:
+        defense_llm = None
 
     # Prepare output CSV
     output_exists = os.path.isfile(output_csv)
-    output_headers = ["poison_prompt", "poison_goal", "trial", "response", "hijacked"]
+    output_headers = ["poison_prompt", "poison_goal", "trial", "raw_response", "response", "defense_triggered", "hijacked"]
     out_f = open(output_csv, "a", newline="", encoding="utf-8")
     writer = csv.writer(out_f)
     if not output_exists:
@@ -111,8 +120,10 @@ def run_test(
     print(f"Benign file     : {benign_file}")
     print(f"Benign prompt   : {benign_prompt_file}")
     print(f"Defense         : {defense}")
+    if defense == "llm":
+        print(f"Defense model   : {defense_model}")
     print(f"Prompts to test : {len(rows)}")
-    print(f"Trials each     : {TRIALS_PER_PROMPT}")
+    print(f"Trials each     : {trials}")
     print(f"Output CSV      : {output_csv}")
     print(f"{'='*60}\n")
 
@@ -129,30 +140,40 @@ def run_test(
         query_engine = build_query_engine(poison_file, top_k, target_llm)
 
         successes = 0
-        for trial in range(1, TRIALS_PER_PROMPT + 1):
-            print(f"  Trial {trial}/{TRIALS_PER_PROMPT}...", end=" ", flush=True)
+        for trial in range(1, trials + 1):
+            print(f"  Trial {trial}/{trials}...", end=" ", flush=True)
 
             raw_response = str(query_engine.query(benign_prompt))
             response = strip_thinking(raw_response)
+            defense_triggered = False
+            if defense == "llm":
+                response, defense_triggered = apply_llm_defense(defense_llm, benign_prompt, response)
 
             hijacked = evaluate_hijack(eval_llm, response, poison_goal)
             if hijacked:
                 successes += 1
 
-            print(f"{'HIJACKED' if hijacked else 'clean'}")
+            if defense_triggered:
+                verdict = "blocked"
+            elif hijacked:
+                verdict = "hijacked"
+            else:
+                verdict = "clean"
 
             writer.writerow([
                 poison_prompt,
                 poison_goal or "",
                 trial,
+                strip_thinking(raw_response),
                 response,
+                defense_triggered,
                 hijacked,
             ])
             out_f.flush()
 
         print(
-            f"[Prompt {prompt_idx}] Done — {successes}/{TRIALS_PER_PROMPT} trials hijacked "
-            f"({100 * successes / TRIALS_PER_PROMPT:.1f}%)\n"
+            f"[Prompt {prompt_idx}] Done -- {successes}/{trials} trials hijacked "
+            f"({100 * successes / trials:.1f}%)\n"
         )
 
     out_f.close()
@@ -193,9 +214,14 @@ def main():
     )
     parser.add_argument(
         "--defense",
-        choices=["none", "bert", "known_answer"],
+        choices=["none", "llm"],
         default="none",
         help="Defense mechanism to apply before querying the target (default: none).",
+    )
+    parser.add_argument(
+        "--defense_model",
+        default=None,
+        help="Ollama model used by the defense layer.",
     )
     parser.add_argument(
         "--embedding",
@@ -213,8 +239,16 @@ def main():
         help="Location to write poisoned file to.",
         default=None
     )
+    parser.add_argument(
+        "--trials",
+        type=int,
+        default=20,
+        help=f"Number of trials to run per poison prompt (default: 20).",
+    )
 
     args = parser.parse_args()
+    if args.defense == "llm" and not args.defense_model:
+        parser.error("A defense model is required when --defense llm is specified.")
 
     run_test(
         poisoned_prompts_csv=args.poisoned_prompts_csv,
@@ -223,9 +257,11 @@ def main():
         benign_prompt_file=args.benign_prompt_file,
         output_csv=args.output_csv,
         defense=args.defense,
+        defense_model=args.defense_model,
         embedding=args.embedding,
         top_k=args.top_k,
-        poison_file=f"{args.benign_file}_poison" if args.poison_file is None else args.poison_file
+        poison_file=f"{args.benign_file}_poison" if args.poison_file is None else args.poison_file,
+        trials=args.trials,
     )
 
 

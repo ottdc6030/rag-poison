@@ -103,6 +103,13 @@ class DefenseResult:
         status = "PASSED" if self.passed else f"FAILED ({n_fail}/{n} canaries failed)"
         return f"KnownAnswerDefense: {status}"
 
+def strip_thinking(text):
+    """Remove <think>...</think> blocks (including any text before the closing tag)."""
+    end_tag = "</think>"
+    idx = text.find(end_tag)
+    if idx != -1:
+        text = text[idx + len(end_tag):]
+    return text.strip()
 
 # ---------------------------------------------------------------------------
 # Defense class
@@ -167,7 +174,7 @@ class KnownAnswerDefense:
 
         for canary in self.canaries:
             raw = query_engine.query(canary.question)
-            actual = str(raw).strip()
+            actual = strip_thinking(str(raw))
 
             if canary.match_style == "exact":
                 score = self._contains(canary.expected_answer, actual)

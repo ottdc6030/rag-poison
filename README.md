@@ -108,8 +108,8 @@ python rag-poison-test.py <adversary_model> <target_model> <poisoned_file> <pois
 | `--top_k` | Document chunks retrieved per RAG query | `4000` |
 | `--max_doc_chars` | Max characters of the benign document sent to the adversary | `4000` |
 | `--standalone` | Adversary writes the poisoned file from scratch; `benign_file` is not used | — |
-| `--defense` | Defense mechanism applied to the target output before attack evaluation | `none` |
-| `--defense_model` | Ollama model used by the defense layer | target model |
+| `--defense` | Defense mechanism applied to the target output before attack evaluation (`none`, `llm`, or `bert`) | `none` |
+| `--defense_model` | Model for the defense layer. Use an Ollama model for `llm` and a Hugging Face model for `bert` | target model for `llm`, `typeform/mobilebert-uncased-mnli` for `bert` |
 
 **Example — poison an existing file:**
 ```bash
@@ -119,6 +119,11 @@ python rag-poison-test.py llama3 llama3 poisoned/people_poisoned.csv badgoal.txt
 **Example — standalone mode (no benign file):**
 ```bash
 python rag-poison-test.py llama3 llama3 poisoned/standalone.txt badgoal.txt goodgoal.txt --standalone
+```
+
+**Example — with LLM defense:**
+```bash
+python rag-poison-test.py dolphin-llama3:latest dolphin-llama3:latest poisoned/resume_poisoned.html badgoal.txt goodgoal.txt data/resume.html --defense llm --defense_model dolphin-llama3:latest
 ```
 
 `goodgoal.txt` and `badgoal.txt` contain example target prompts and poison goals respectively and can be used as templates for your own experiments. Successful injections are appended to `successes.csv` with the injection text, attempt number, and full target response.
@@ -145,8 +150,8 @@ python injection-tester.py <poisoned_prompts_csv> <benign_file> <target_model> <
 
 | Option | Description | Default |
 |---|---|---|
-| `--defense` | Defense mechanism apply to the output before evaluation | `none` |
-| `--defense_model` | Ollama model used by the defense layer | target model |
+| `--defense` | Defense mechanism applied to the output before evaluation (`none`, `llm`, or `bert`) | `none` |
+| `--defense_model` | Model for the defense layer. Use an Ollama model for `llm` and a Hugging Face model for `bert` | required for `llm`, `typeform/mobilebert-uncased-mnli` for `bert` |
 | `--embedding` | HuggingFace embedding model for RAG | `BAAI/bge-small-en-v1.5` |
 | `--top_k` | Document chunks retrieved per RAG query | `4000` |
 | `--poison_file` | Path to write the temporary poisoned file | auto (temp file) |
@@ -155,4 +160,14 @@ python injection-tester.py <poisoned_prompts_csv> <benign_file> <target_model> <
 **Example:**
 ```bash
 python injection-tester.py statistics/lying-csv/round_1_successes.csv data/people.csv llama3 goodgoal.txt results.csv
+```
+
+**Example with LLM defense:**
+```bash
+python injection-tester.py bert_defense_eval_prompts.csv data/resume.html dolphin-llama3:latest goodgoal.txt results.csv --defense llm --defense_model dolphin-llama3:latest
+```
+
+**Example with BERT defense:**
+```bash
+python injection-tester.py bert_defense_eval_prompts.csv data/resume.html dolphin-llama3:latest goodgoal.txt results.csv --defense bert --defense_model typeform/mobilebert-uncased-mnli
 ```

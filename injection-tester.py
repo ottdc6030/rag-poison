@@ -10,8 +10,12 @@ from llama_index.embeddings.huggingface import HuggingFaceEmbedding
 from argparse import ArgumentParser
 
 from rag_poison_test import (
+    DEFAULT_BERT_DEFENSE_MODEL,
+    BertDefense,
+    apply_bert_defense,
     apply_llm_defense,
     build_query_engine,
+    extract_response_context,
     load_text,
     strip_thinking,
     write_poisoned_file,
@@ -93,8 +97,13 @@ def run_test(
     eval_llm = Ollama(model=target_model, request_timeout=1000.0)
     if defense == "llm":
         defense_llm = Ollama(model=defense_model, request_timeout=1000.0)
+        bert_defense = None
+    elif defense == "bert":
+        defense_llm = None
+        bert_defense = BertDefense(model_name=defense_model or DEFAULT_BERT_DEFENSE_MODEL)
     else:
         defense_llm = None
+        bert_defense = None
 
     # Prepare output CSV
     output_exists = os.path.isfile(output_csv)
@@ -120,8 +129,11 @@ def run_test(
     print(f"Benign file     : {benign_file}")
     print(f"Benign prompt   : {benign_prompt_file}")
     print(f"Defense         : {defense}")
-    if defense == "llm":
-        print(f"Defense model   : {defense_model}")
+    if defense in {"llm", "bert"}:
+        print(
+            f"Defense model   : "
+            f"{defense_model or (target_model if defense == 'llm' else DEFAULT_BERT_DEFENSE_MODEL)}"
+        )
     print(f"Prompts to test : {len(rows)}")
     print(f"Trials each     : {trials}")
     print(f"Output CSV      : {output_csv}")
@@ -143,11 +155,20 @@ def run_test(
         for trial in range(1, trials + 1):
             print(f"  Trial {trial}/{trials}...", end=" ", flush=True)
 
-            raw_response = str(query_engine.query(benign_prompt))
+            query_response = query_engine.query(benign_prompt)
+            raw_response = str(query_response)
+            retrieved_context = extract_response_context(query_response)
             response = strip_thinking(raw_response)
             defense_triggered = False
             if defense == "llm":
                 response, defense_triggered = apply_llm_defense(defense_llm, benign_prompt, response)
+            elif defense == "bert":
+                response, defense_triggered = apply_bert_defense(
+                    bert_defense,
+                    benign_prompt,
+                    response,
+                    retrieved_context=retrieved_context,
+                )
 
             hijacked = evaluate_hijack(eval_llm, response, poison_goal)
             if hijacked:
@@ -159,6 +180,12 @@ def run_test(
                 verdict = "hijacked"
             else:
                 verdict = "clean"
+            print(
+                f"[Debug] raw_response={raw_response!r} "
+                f"retrieved_context_chars={len(retrieved_context)} "
+                f"defense_triggered={defense_triggered} "
+                f"verdict={verdict}"
+            )
 
             writer.writerow([
                 poison_prompt,
@@ -214,14 +241,14 @@ def main():
     )
     parser.add_argument(
         "--defense",
-        choices=["none", "llm"],
+        choices=["none", "llm", "bert"],
         default="none",
         help="Defense mechanism to apply before querying the target (default: none).",
     )
     parser.add_argument(
         "--defense_model",
         default=None,
-        help="Ollama model used by the defense layer.",
+        help="Defense model identifier. Uses an Ollama model for --defense llm and a Hugging Face model for --defense bert.",
     )
     parser.add_argument(
         "--embedding",

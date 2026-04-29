@@ -12,7 +12,7 @@ from llama_index.embeddings.huggingface import HuggingFaceEmbedding
 from argparse import ArgumentParser
 
 from rag_poison_test import load_text, strip_thinking, write_poisoned_file, build_query_engine
-from defenses import KnownAnswerDefense, Canary
+from defenses import DEFAULT_BERT_DEFENSE_MODEL, BertDefense, KnownAnswerDefense, Canary
 
 # Injection robustness tester.
 # Given a CSV of pre-crafted poisoned prompts, this script injects each one into a
@@ -91,6 +91,7 @@ def run_test(
     injection_position=-1,
     evaluator="adversary",
     adversary_model=None,
+    defense_model=None,
 ):
     benign_prompt = load_text(benign_prompt_file)
 
@@ -136,6 +137,8 @@ def run_test(
     print(f"Benign file     : {benign_file}")
     print(f"Benign prompt   : {benign_prompt_file}")
     print(f"Defense         : {defense}")
+    if defense == "bert":
+        print(f"Defense model   : {defense_model or DEFAULT_BERT_DEFENSE_MODEL}")
     print(f"Evaluator       : {evaluator} ({adversary_model if evaluator == 'adversary' else target_model})")
     print(f"Prompts to test : {len(rows)}")
     print(f"Trials each     : {TRIALS_PER_PROMPT}")
@@ -185,6 +188,20 @@ def run_test(
                     # A timeout on a trivially simple instruction is itself a sign of
                     # injection (the file is sabotaging the canary query).
                     defense_detected = True
+            elif defense == "bert":
+                bert_defense = BertDefense(
+                    model_name=defense_model or DEFAULT_BERT_DEFENSE_MODEL,
+                    verbose=True,
+                )
+                bert_result = bert_defense.scan_file(poison_file)
+                print(f"[BertDefense] {bert_result.summary()}")
+                if bert_result.flagged and bert_result.findings:
+                    strongest = max(bert_result.findings, key=lambda finding: finding.score)
+                    print(
+                        "[BertDefense] strongest match "
+                        f"score={strongest.score:.3f} hypothesis={strongest.hypothesis!r}"
+                    )
+                defense_detected = bert_result.flagged
 
             if defense_detected:
                 print("blocked by defense")
@@ -288,9 +305,17 @@ def main():
     )
     parser.add_argument(
         "--defense",
-        choices=["none", "known_answer"],
+        choices=["none", "known_answer", "bert"],
         default="none",
         help="Defense mechanism to apply before querying the target (default: none).",
+    )
+    parser.add_argument(
+        "--defense_model",
+        default=None,
+        help=(
+            "Hugging Face model name for --defense bert "
+            f"(default: {DEFAULT_BERT_DEFENSE_MODEL})."
+        ),
     )
     parser.add_argument(
         "--embedding",
@@ -345,6 +370,7 @@ def main():
         benign_prompt_file=args.benign_prompt_file,
         output_csv=args.output_csv,
         defense=args.defense,
+        defense_model=args.defense_model,
         embedding=args.embedding,
         top_k=args.top_k,
         poison_file=f"{args.benign_file}_poison" if args.poison_file is None else args.poison_file,

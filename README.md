@@ -149,6 +149,10 @@ python injection-tester.py <poisoned_prompts_csv> <benign_file> <target_model> <
 | `--poison_file` | Path to write the temporary poisoned file | auto (temp file) |
 
 **Example:**
+
 ```bash
 python injection-tester.py statistics/lying-csv/round_1_successes.csv data/people.csv llama3 goodgoal.txt results.csv
+```
+```bash
+python injection-tester.py statistics/lying-html/successes.csv data/resume.html llama3 goodgoal.txt results.csv
 ```

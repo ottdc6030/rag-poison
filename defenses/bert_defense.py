@@ -19,7 +19,7 @@ from transformers import AutoModelForSequenceClassification, AutoTokenizer
 
 
 DEFAULT_BERT_DEFENSE_MODEL = "typeform/mobilebert-uncased-mnli"
-DEFAULT_BERT_ATTACK_THRESHOLD = 0.55
+DEFAULT_BERT_ATTACK_THRESHOLD = 0.8
 
 
 @dataclass

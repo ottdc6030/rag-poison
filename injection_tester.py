@@ -19,9 +19,6 @@ from defenses import DEFAULT_BERT_DEFENSE_MODEL, BertDefense, KnownAnswerDefense
 # benign file, then repeatedly queries a target model with a benign prompt to measure
 # how often the injection succeeds in hijacking the model's response.
 
-TRIALS_PER_PROMPT = 1
-
-
 # ---------------------------------------------------------------------------
 # Evaluation
 # ---------------------------------------------------------------------------
@@ -130,6 +127,10 @@ def run_test(
         raise ValueError(f"Input CSV must have a 'poison_prompt' column. Found: {reader.fieldnames}")
 
     has_goal = "poison_goal" in (reader.fieldnames or [])
+
+    
+    TRIALS_PER_PROMPT = 1 if defense == "bert" else 20
+    
 
     print(f"\n{'='*60}")
     print("Injection Robustness Tester")

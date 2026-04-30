@@ -80,7 +80,7 @@ Place the files you want to query (e.g. resumes, PDFs, text files) in the `data/
 
 ---
 
-### `rag-poison-test.py` — Iterative RAG poisoning harness
+### `rag_poison_test.py` — Iterative RAG poisoning harness
 
 Runs a multi-turn red-team experiment in which an **adversary model** tries to hijack a **target model** via a poisoned RAG document. Each attempt, the adversary crafts hidden directives and embeds them into a document. The target loads the poisoned document and answers a benign user prompt. The adversary then judges whether the attack succeeded; if not, it reflects on the failure and tries again. Successful attacks are recorded to `successes.csv`.
 
@@ -89,7 +89,7 @@ Two modes are supported:
 - **Standalone** (`--standalone`): the adversary writes an entirely adversarial file from scratch, with no benign source document required.
 
 ```bash
-python rag-poison-test.py <adversary_model> <target_model> <poisoned_file> <poison_goal> <target_prompt> [benign_file] [options]
+python rag_poison_test.py <adversary_model> <target_model> <poisoned_file> <poison_goal> <target_prompt> [benign_file] [options]
 ```
 
 | Argument | Description |
@@ -108,29 +108,33 @@ python rag-poison-test.py <adversary_model> <target_model> <poisoned_file> <pois
 | `--top_k` | Document chunks retrieved per RAG query | `4000` |
 | `--max_doc_chars` | Max characters of the benign document sent to the adversary | `4000` |
 | `--standalone` | Adversary writes the poisoned file from scratch; `benign_file` is not used | — |
+| `--keep_target_thinking` | Pass the target's raw `<think>` blocks to the adversary instead of stripping them | — |
+| `--injection_position` | Where to insert the injection: `-1` = append, `0` = prepend, `N` = after line N | `-1` |
+| `--evaluator` | Which model judges whether an injection succeeded (`adversary` or `target`) | `adversary` |
+| `--critic` | Which model reflects on failures and suggests improvements (`adversary` or `target`) | `adversary` |
 
 **Example — poison an existing file:**
 ```bash
-python rag-poison-test.py llama3 llama3 poisoned/people_poisoned.csv badgoal.txt goodgoal.txt data/people.csv
+python rag_poison_test.py llama3 llama3 poisoned/people_poisoned.csv badgoal.txt goodgoal.txt data/people.csv
 ```
 
 **Example — standalone mode (no benign file):**
 ```bash
-python rag-poison-test.py llama3 llama3 poisoned/standalone.txt badgoal.txt goodgoal.txt --standalone
+python rag_poison_test.py llama3 llama3 poisoned/standalone.txt badgoal.txt goodgoal.txt --standalone
 ```
 
 `goodgoal.txt` and `badgoal.txt` contain example target prompts and poison goals respectively and can be used as templates for your own experiments. Successful injections are appended to `successes.csv` with the injection text, attempt number, and full target response.
 
 ---
 
-### `injection-tester.py` — Injection robustness tester
+### `injection_tester.py` — Injection robustness tester
 
 Reads a CSV of pre-crafted poison prompts and measures how reliably each one hijacks a target model. For every prompt, the injection is embedded into a benign file and the target is queried `TRIALS_PER_PROMPT` (default: 20) times. A separate evaluator LLM judges each response and the per-prompt hijack rate is reported.
 
 The input CSV must have a `poison_prompt` column. An optional `poison_goal` column enables more precise evaluation; without it a generic hijack-detection prompt is used.
 
 ```bash
-python injection-tester.py <poisoned_prompts_csv> <benign_file> <target_model> <benign_prompt_file> <output_csv> [options]
+python injection_tester.py <poisoned_prompts_csv> <benign_file> <target_model> <benign_prompt_file> <output_csv> [options]
 ```
 
 | Argument | Description |
@@ -139,20 +143,67 @@ python injection-tester.py <poisoned_prompts_csv> <benign_file> <target_model> <
 | `benign_file` | Original document that each injection is embedded into |
 | `target_model` | Ollama model being tested for resilience |
 | `benign_prompt_file` | Text file containing the benign query the target is asked |
-| `output_csv` | CSV file where results are appended (`poison_prompt`, `poison_goal`, `trial`, `response`, `hijacked`) |
+| `output_csv` | CSV file where results are appended (`poison_prompt`, `poison_goal`, `trial`, `response`, `defense_detected`, `hijacked`) |
 
 | Option | Description | Default |
 |---|---|---|
-| `--defense` | Defense mechanism to apply before querying the target (currently defunct — will be implemented in a future update) | `none` |
+| `--defense` | Defense mechanism to apply before querying the target (`none`, `known_answer`, `bert`) | `none` |
+| `--defense_model` | HuggingFace NLI model to use when `--defense bert` is set | `typeform/mobilebert-uncased-mnli` |
+| `--adversary_model` | Ollama model used as the evaluator when `--evaluator adversary` is set | *(required if adversary evaluator)* |
 | `--embedding` | HuggingFace embedding model for RAG | `BAAI/bge-small-en-v1.5` |
 | `--top_k` | Document chunks retrieved per RAG query | `4000` |
 | `--poison_file` | Path to write the temporary poisoned file | auto (temp file) |
+| `--manual` | Human user evaluates each response (Y/N) instead of an LLM evaluator | — |
+| `--injection_position` | Where to insert the injection: `-1` = append, `0` = prepend, `N` = after line N | `-1` |
+| `--evaluator` | Which model judges whether an injection succeeded (`adversary` or `target`) | `adversary` |
 
 **Example:**
 
 ```bash
-python injection-tester.py statistics/lying-csv/round_1_successes.csv data/people.csv llama3 goodgoal.txt results.csv
+python injection_tester.py statistics/lying-csv/round_1_successes.csv data/people.csv llama3 goodgoal.txt results.csv
 ```
 ```bash
-python injection-tester.py statistics/lying-html/successes.csv data/resume.html llama3 goodgoal.txt results.csv
+python injection_tester.py statistics/lying-html/successes.csv data/resume.html llama3 goodgoal.txt results.csv
+```
+
+---
+
+### `evaluate_bert_baseline.py` — BERT defense baseline check
+
+Runs the BERT defense against a clean, un-poisoned file to measure whether it produces false positives. Useful for calibrating the defense threshold before deploying it in `injection_tester.py`.
+
+```bash
+python evaluate_bert_baseline.py <context_file> [--model <hf-model>]
+```
+
+| Argument | Description | Default |
+|---|---|---|
+| `context_file` | Un-poisoned file to scan | *(required)* |
+| `--model` | HuggingFace NLI model to use | `typeform/mobilebert-uncased-mnli` |
+
+**Example:**
+```bash
+python evaluate_bert_baseline.py data/people.csv
+```
+
+Prints the entailment score and a `blocked` / `allowed` verdict.
+
+---
+
+### `summarize_results.py` — Aggregate injection test results
+
+Post-processes the output CSV from `injection_tester.py`. Groups rows by `(poison_prompt, poison_goal)` pair and computes the hijack rate for each injection across all trials.
+
+```bash
+python summarize_results.py <input_csv> <output_csv>
+```
+
+| Argument | Description |
+|---|---|
+| `input_csv` | Raw results CSV produced by `injection_tester.py` |
+| `output_csv` | Summary CSV to write (`poison_prompt`, `poison_goal`, `total_trials`, `hijack_count`, `hijack_rate`) |
+
+**Example:**
+```bash
+python summarize_results.py results.csv summary.csv
 ```

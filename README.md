@@ -123,7 +123,7 @@ python rag_poison_test.py llama3 llama3 poisoned/people_poisoned.csv badgoal.txt
 python rag_poison_test.py llama3 llama3 poisoned/standalone.txt badgoal.txt goodgoal.txt --standalone
 ```
 
-`goodgoal.txt` and `badgoal.txt` contain example target prompts and poison goals respectively and can be used as templates for your own experiments. Successful injections are appended to `successes.csv` with the injection text, attempt number, and full target response.
+Successful injections are appended to `successes.csv` with the injection text, attempt number, and full target response.
 
 ---
 

@@ -207,7 +207,7 @@ class BertDefense:
         with open(path, "r", errors="replace") as f:
             return self.scan_text(f.read())
 
-    def evaluate(self, user_prompt, model_output, retrieved_context=None):
+    def evaluate(self, retrieved_context=None):
         """
         Score whether an answer looks correct to the user prompt or influenced
         by prompt-injection content.

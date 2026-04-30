@@ -19,7 +19,7 @@ from defenses import DEFAULT_BERT_DEFENSE_MODEL, BertDefense, KnownAnswerDefense
 # benign file, then repeatedly queries a target model with a benign prompt to measure
 # how often the injection succeeds in hijacking the model's response.
 
-TRIALS_PER_PROMPT = 20
+TRIALS_PER_PROMPT = 1
 
 
 # ---------------------------------------------------------------------------

@@ -195,6 +195,7 @@ def run_test(
                 )
                 bert_result = bert_defense.scan_file(poison_file)
                 print(f"[BertDefense] {bert_result.summary()}")
+                print(f"[BertDefense] context_attack_entailment={bert_result.best_score:.3f}")
                 if bert_result.flagged and bert_result.findings:
                     strongest = max(bert_result.findings, key=lambda finding: finding.score)
                     print(

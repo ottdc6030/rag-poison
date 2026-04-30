@@ -45,6 +45,13 @@ class BertDefenseResult:
         return f"BertDefense: {status} best_score={self.best_score:.3f} threshold={self.threshold:.3f}"
 
 
+@dataclass
+class BertDefenseDecision:
+    flagged: bool
+    context_attack_entailment: float | None = None
+    reason: str = "no threshold exceeded"
+
+
 def _normalize_label(label):
     return str(label).strip().lower().replace("-", "_")
 
@@ -105,6 +112,9 @@ class BertDefense:
         )
 
     def _score_entailment(self, premise, hypothesis):
+        return self._score_label(premise, hypothesis, self.entailment_index)
+
+    def _score_label(self, premise, hypothesis, label_index):
         encoded = self.tokenizer(
             premise,
             hypothesis,
@@ -115,7 +125,7 @@ class BertDefense:
         with torch.no_grad():
             logits = self.model(**encoded).logits[0]
         probabilities = torch.softmax(logits, dim=0)
-        return float(probabilities[self.entailment_index])
+        return float(probabilities[label_index])
 
     def _context_windows(self, text, max_chars=1800):
         paragraphs = [paragraph.strip() for paragraph in text.splitlines() if paragraph.strip()]
@@ -196,3 +206,37 @@ class BertDefense:
         """
         with open(path, "r", errors="replace") as f:
             return self.scan_text(f.read())
+
+    def evaluate(self, user_prompt, model_output, retrieved_context=None):
+        """
+        Score whether an answer looks correct to the user prompt or influenced
+        by prompt-injection content.
+        """
+
+        context_attack_entailment = None
+        if retrieved_context:
+            context_result = self.scan_text(retrieved_context)
+            context_attack_entailment = context_result.best_score
+
+        flagged = False
+        reason = "no threshold exceeded"
+        if context_attack_entailment is not None and context_attack_entailment >= self.threshold:
+            flagged = True
+            reason = (
+                "retrieved context looks injected "
+                f"({context_attack_entailment:.3f} >= {self.threshold:.3f})"
+            )
+
+        if self.verbose:
+            print(
+                "[BertDefense] "
+                f"context_attack={context_attack_entailment} "
+                f"decision={'BLOCK' if flagged else 'ALLOW'} "
+                f"reason={reason}"
+            )
+
+        return BertDefenseDecision(
+            flagged=flagged,
+            context_attack_entailment=context_attack_entailment,
+            reason=reason,
+        )
